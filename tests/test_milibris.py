@@ -21,9 +21,11 @@ from Crypto.Protocol.KDF import PBKDF2
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from milibris_cli import (  # noqa: E402
     MATERIAL_SALT,
+    article_to_html,
     _evp_bytes_to_key,
     article_to_markdown,
     decrypt_material,
+    issue_to_html,
     kiosk_config,
     parse_featured_issue,
     parse_fr_date,
@@ -295,3 +297,67 @@ def test_markdown_drops_the_abstract_when_it_opens_the_body():
 
 def test_markdown_keeps_a_distinct_abstract(rendered):
     assert "**Après un été brûlant, c’est la rentrée.**" in rendered
+
+
+# -- issue PDF document ------------------------------------------------------ #
+TOC_ROWS = [
+    {"id": "a1", "title": "La gauche soumise", "page": 3, "rubric": "FRANCE TIREUR"},
+    {"id": "a2", "title": "Le RN veut passer en force", "page": 4, "rubric": "SUR TOUS LES FRONTS"},
+    {"id": "a3", "title": "Six pieds sous terre", "page": 5, "rubric": "SUR TOUS LES FRONTS"},
+]
+
+
+@pytest.fixture
+def issue_html():
+    return issue_to_html(META, TOC_ROWS, {"a1": ARTICLE},
+                         lambda p: f"local/{p.rsplit('/', 1)[-1]}")
+
+
+def test_issue_html_opens_and_closes_one_list_per_rubric(issue_html):
+    assert issue_html.count("<ol>") == issue_html.count("</ol>") == 2
+
+
+def test_issue_html_names_each_rubric_once(issue_html):
+    assert issue_html.count("SUR TOUS LES FRONTS") == 1
+
+
+def test_issue_html_lists_every_article_in_the_contents(issue_html):
+    assert all(row["title"] in issue_html for row in TOC_ROWS)
+
+
+def test_issue_html_carries_the_page_numbers(issue_html):
+    assert "p. 3" in issue_html and "p. 5" in issue_html
+
+
+def test_issue_html_renders_the_cover(issue_html):
+    assert "<h1>Franc-Tireur</h1>" in issue_html
+
+
+def test_issue_html_skips_articles_that_were_not_fetched(issue_html):
+    # Only a1 was supplied, so exactly one <article> body is typeset.
+    assert issue_html.count("<article>") == 1
+
+
+def test_article_html_renders_the_rubric_kicker():
+    out = article_to_html(ARTICLE, "FRANCE TIREUR")
+    assert '<p class="rubric">FRANCE TIREUR</p>' in out
+
+
+def test_article_html_maps_classes_to_tags():
+    out = article_to_html(ARTICLE, None)
+    assert "<h4>MANGER LES RICHES</h4>" in out and "<blockquote>" in out
+
+
+def test_article_html_drops_a_credit_that_repeats_the_byline():
+    out = article_to_html(dict(ARTICLE, authors=["DR"]), None)
+    assert "<figcaption>" not in out
+
+
+def test_article_html_keeps_a_real_picture_credit():
+    out = article_to_html(ARTICLE, None)
+    assert "<figcaption>DR</figcaption>" in out
+
+
+def test_article_html_routes_images_through_the_resolver():
+    out = article_to_html(ARTICLE, None, lambda p: f"local/{p.rsplit('/', 1)[-1]}")
+    assert 'src="local/abc.jpg"' in out

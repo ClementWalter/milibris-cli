@@ -56,7 +56,9 @@ milibris issues -n 20                        # newest first
 milibris issue n249-2026 --json
 milibris toc --json                          # id, page, rubric, words, abstract
 milibris read <article-id> --issue n249-2026 # Markdown to stdout
-milibris dump --hd -o ./out                  # pages + PDF + per-article Markdown
+milibris pdf                                 # readable PDF, typeset from the text
+milibris pdf --facsimile                     # the page scans instead
+milibris dump -o ./out                       # pages + both PDFs + Markdown
 milibris search "ukraine" --issue n250-2026 --json
 milibris material                            # the raw decrypted manifest
 milibris set-host digital.example.fr
@@ -69,11 +71,25 @@ slug is an error, never a silent fallback to the latest issue.
 `dump` writes to `./dump/<title>/<date>/`:
 
 ```
-pages/page-NNN.jpg     LD renders, or HD tilesets stitched with --hd
-<title>-<date>.pdf     the pages assembled
-pNNN-<slug>.md         one Markdown file per article, YAML frontmatter included
-resources/<mid>.jpg    article images, saved so the files outlive the ticket
+pages/page-NNN.jpg              HD stitched page renders (--ld for the small ones)
+<title>-<date>-facsimile.pdf    the page renders assembled
+<title>-<date>-texte.pdf        readable PDF typeset from the article text
+pNNN-<slug>.md                  one Markdown file per article, frontmatter included
+resources/<mid>.jpg             article images, saved so the files outlive the ticket
 ```
+
+## Resolution
+
+The liseuse caps page rasters at about **1400×2050 pixels per printed sheet** and
+exposes nothing larger: `hd` is the manifest maximum, the tiles measure exactly
+that, and the kiosk has no PDF download. On a broadsheet, where one "page" is a
+sheet carrying two newspaper pages, body text lands around 11px — legible at 1:1
+on screen, mushy in print.
+
+`milibris pdf` therefore typesets the article text into an A4 document instead:
+sharp at any zoom, searchable, selectable, and roughly 15× smaller than the
+facsimile. Use `--facsimile` when you want the printed layout rather than a
+readable text.
 
 ## Notes on the protocol
 
@@ -84,7 +100,8 @@ resources/<mid>.jpg    article images, saved so the files outlive the ticket
   PBKDF2-SHA256 over a salt the reader bundle obfuscates. Both paths are
   implemented; the encrypted one is exercised by a round-trip test.
 - **HD pages** are tilesets addressed `…/tile0CxR.jpeg` (column-major), stitched
-  locally with Pillow. A 1×1 tileset is the image itself.
+  locally with Pillow. A 1×1 tileset is the image itself, and HD is the ceiling —
+  see *Resolution* above.
 
 ## As a library
 
@@ -104,5 +121,5 @@ uv run --with pytest --with click --with curl_cffi --with beautifulsoup4 \
   --with lxml --with markdownify --with pycryptodome -m pytest tests -q
 ```
 
-44 tests over the pure layers — ref parsing, the manifest key derivation,
+55 tests over the pure layers — ref parsing, the manifest key derivation,
 catalogue scraping and Markdown rendering. No network.

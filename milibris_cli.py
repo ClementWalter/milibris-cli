@@ -38,6 +38,7 @@ import base64
 import datetime as dt
 import hashlib
 import hmac
+import html
 import json as jsonlib
 import logging
 import os
@@ -395,6 +396,8 @@ def article_to_markdown(article: dict, meta: dict | None = None,
                 caption = html_to_markdown(item.get("caption") or "")
                 lines.append(f"![{caption}]({src})")
                 credit = item.get("credit")
+                if credit and credit in (article.get("authors") or []):
+                    credit = None  # the byline again, not a picture credit
                 if caption or credit:
                     lines.append(f"*{' — '.join(x for x in (caption, credit) if x)}*")
                 lines.append("")
@@ -419,6 +422,203 @@ def article_to_markdown(article: dict, meta: dict | None = None,
         lines += [f"[^]: {html_to_markdown(note if isinstance(note, str) else jsonlib.dumps(note))}"]
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+# --------------------------------------------------------------------------- #
+# Reader PDF (typeset from the article text, not from the page scans)
+# --------------------------------------------------------------------------- #
+# The liseuse tops out at a ~1400x2050 raster per printed sheet. On a broadsheet
+# that is barely legible and never selectable, so the readable PDF is typeset
+# from the article JSON instead; the page scans stay available as the facsimile.
+ISSUE_CSS = """
+@page { size: A4; margin: 1.9cm 1.7cm 1.7cm;
+        @bottom-center { content: counter(page); font: 8pt Helvetica, sans-serif;
+                         color: #888; } }
+@page :first { margin: 6cm 1.7cm 1.7cm; @bottom-center { content: ""; } }
+body { font-family: Georgia, "Times New Roman", serif; font-size: 10.5pt;
+       line-height: 1.5; color: #16161a; }
+.cover { text-align: center; page-break-after: always; }
+.cover h1 { font-size: 34pt; letter-spacing: -0.01em; margin: 0 0 0.2em; }
+.cover .issue { font-size: 15pt; color: #555; margin: 0 0 0.4em; }
+.cover .date { font-size: 11pt; color: #888; text-transform: uppercase;
+               letter-spacing: 0.12em; }
+.toc { page-break-after: always; }
+.toc h2 { font-size: 15pt; margin: 0 0 1em; border-bottom: 1.5px solid #16161a;
+          padding-bottom: 0.3em; }
+.toc .rubric { font: bold 8.5pt Helvetica, sans-serif; text-transform: uppercase;
+               letter-spacing: 0.1em; color: #888; margin: 1.2em 0 0.4em; }
+.toc ol { margin: 0; padding-left: 1.2em; }
+.toc li { margin: 0 0 0.25em; }
+.toc .page { color: #888; font-size: 9pt; }
+article { page-break-before: always; }
+article .rubric { font: bold 8.5pt Helvetica, sans-serif; text-transform: uppercase;
+                  letter-spacing: 0.1em; color: #b0332a; margin: 0 0 0.5em; }
+article h2 { font-size: 20pt; line-height: 1.15; margin: 0 0 0.3em; }
+article .surtitle { font-size: 10pt; color: #777; font-style: italic;
+                    margin: 0 0 0.2em; }
+article .subtitle { font-size: 12pt; color: #444; font-weight: normal;
+                    margin: 0 0 0.6em; }
+article .byline { font: 8.5pt Helvetica, sans-serif; color: #777;
+                  text-transform: uppercase; letter-spacing: 0.06em;
+                  margin: 0 0 1.2em; }
+article .abstract { font-size: 11.5pt; font-style: italic; color: #333;
+                    line-height: 1.45; margin: 0 0 1.2em; }
+h3 { font-size: 11pt; font-family: Helvetica, sans-serif; margin: 1.4em 0 0.4em; }
+h4 { font-size: 10pt; font-family: Helvetica, sans-serif; letter-spacing: 0.04em;
+     margin: 1.2em 0 0.3em; }
+p { margin: 0 0 0.65em; text-align: justify; hyphens: auto; }
+blockquote { margin: 1em 0; padding-left: 0.9em; border-left: 2.5px solid #b0332a;
+             font-size: 12pt; font-style: italic; color: #444; }
+figure { margin: 1em 0; page-break-inside: avoid; }
+img { max-width: 100%; }
+figcaption { font: 8.5pt Helvetica, sans-serif; color: #777; margin-top: 0.3em; }
+"""
+
+
+def _pdf_url_fetcher(url: str):
+    """Fetch a reader asset for WeasyPrint through the Chrome fingerprint."""
+    from weasyprint import default_url_fetcher
+
+    if url.startswith(("data:", "file:")):
+        return default_url_fetcher(url)
+    resp = requests.get(url, headers={"User-Agent": UA},
+                        impersonate=TLS_IMPERSONATE, timeout=30)
+    resp.raise_for_status()  # a missing image must never abort the whole PDF
+    mime = (resp.headers.get("Content-Type") or "image/jpeg").split(";")[0]
+    return {"string": resp.content, "mime_type": mime}
+
+
+def html_to_pdf(document: str, out: Path, base_url: str | None = None) -> None:
+    """Write a PDF with the first working engine.
+
+    WeasyPrint's Python lib is preferred — it is the only path that fetches the
+    ticketed images. It needs native libs (`brew install pango` on macOS);
+    failing that, any `wkhtmltopdf` or `weasyprint` binary on PATH renders the
+    same document, minus the remote images.
+    """
+    out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        import contextlib
+        import io
+
+        # A failed WeasyPrint import prints a multi-line native-libs block;
+        # silence it so the binary fallback stays quiet.
+        for noisy in ("weasyprint", "fontTools", "PIL"):
+            logging.getLogger(noisy).setLevel(logging.ERROR)
+        sink = io.StringIO()
+        with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+            from weasyprint import HTML
+        HTML(string=document, base_url=base_url,
+             url_fetcher=_pdf_url_fetcher).write_pdf(str(out))
+        return
+    except (ImportError, OSError):
+        pass
+
+    with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False,
+                                     encoding="utf-8") as fh:
+        fh.write(document)
+        tmp = fh.name
+    try:
+        for argv in (["wkhtmltopdf", "--quiet", "--encoding", "utf-8", tmp, str(out)],
+                     ["weasyprint", tmp, str(out)]):
+            if shutil.which(argv[0]) is None:
+                continue
+            run = subprocess.run(argv, capture_output=True, text=True, check=False)
+            if run.returncode == 0 and out.exists():
+                return
+        raise click.ClickException(
+            "No working HTML→PDF engine. Install WeasyPrint's native libs "
+            "(`brew install pango`), wkhtmltopdf, or the weasyprint CLI."
+        )
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+
+
+def article_to_html(article: dict, rubric: str | None, asset_url=None) -> str:
+    """One article as an HTML section for the issue PDF."""
+    esc = html.escape
+    out = ["<article>"]
+    if rubric:
+        out.append(f'<p class="rubric">{esc(rubric)}</p>')
+    if article.get("surtitle"):
+        out.append(f'<p class="surtitle">{html_to_markdown(article["surtitle"])}</p>')
+    out.append(f"<h2>{esc(article.get('title', ''))}</h2>")
+    if article.get("subtitle"):
+        out.append(f'<p class="subtitle">{html_to_markdown(article["subtitle"])}</p>')
+    if article.get("authors"):
+        out.append(f'<p class="byline">{esc(" — ".join(article["authors"]))}</p>')
+    abstract = html_to_markdown(article.get("abstract") or "")
+    if abstract and not _opens_with(article, abstract):
+        out.append(f'<p class="abstract">{esc(abstract)}</p>')
+
+    def render(items: list) -> None:
+        for item in items:
+            kind = item.get("type")
+            if kind == "section":
+                render(item.get("items", []))
+            elif kind == "image":
+                url = item.get("url") or (item.get("mid") and f"../resources/{item['mid']}.jpg")
+                if not url:
+                    continue
+                src = asset_url(url) if asset_url else url
+                credit = item.get("credit")
+                if credit and credit in (article.get("authors") or []):
+                    credit = None  # the byline again, not a picture credit
+                caption = " — ".join(x for x in (item.get("caption"), credit) if x)
+                out.append(f'<figure><img src="{esc(src)}">'
+                           + (f"<figcaption>{esc(caption)}</figcaption>" if caption else "")
+                           + "</figure>")
+            elif kind == "text" and item.get("content"):
+                body = item["content"]
+                css = item.get("class")
+                if css == "heading":
+                    out.append(f"<h3>{body}</h3>")
+                elif css == "intertitle":
+                    out.append(f"<h4>{body}</h4>")
+                elif css == "quote":
+                    out.append(f"<blockquote>{body}</blockquote>")
+                else:
+                    out.append(f"<p>{body}</p>")
+
+    for section in article.get("content", {}).get("sections", []):
+        render(section.get("items", []))
+    out.append("</article>")
+    return "".join(out)
+
+
+def issue_to_html(meta: dict, rows: list[dict], articles: dict, asset_url=None) -> str:
+    """The whole issue as one typeset document: cover, contents, then articles."""
+    esc = html.escape
+    parts = [
+        '<!doctype html><html lang="fr"><head><meta charset="utf-8">',
+        (f"<title>{esc(meta.get('title', 'Issue'))} "
+         f"N°{esc(str(meta.get('issue_number', '')))}</title>"),
+        f"<style>{ISSUE_CSS}</style></head><body>",
+        '<section class="cover">',
+        f"<h1>{esc(meta.get('title', ''))}</h1>",
+        f'<p class="issue">N° {esc(str(meta.get("issue_number", "")))}</p>',
+        f'<p class="date">{esc(meta.get("publication_localized_date") or meta.get("publication_date", ""))}</p>',
+        "</section>",
+        '<section class="toc"><h2>Sommaire</h2>',
+    ]
+    current = None
+    for row in rows:
+        if row["rubric"] != current:
+            if current is not None:
+                parts.append("</ol>")
+            current = row["rubric"]
+            parts.append(f'<p class="rubric">{esc(current or "")}</p><ol>')
+        parts.append(f'<li>{esc(row["title"])}'
+                     f'<span class="page">&#160;&#160;p. {row["page"]}</span></li>')
+    if current is not None:
+        parts.append("</ol>")
+    parts.append("</section>")
+    for row in rows:
+        article = articles.get(row["id"])
+        if article:
+            parts.append(article_to_html(article, row["rubric"], asset_url))
+    parts.append("</body></html>")
+    return "".join(parts)
 
 
 # --------------------------------------------------------------------------- #
@@ -742,7 +942,9 @@ def cli() -> None:
       milibris toc                          # TOC of the latest issue
       milibris toc n249-2026 --json         # TOC of one issue, as JSON
       milibris read <article-id>            # one article as Markdown
-      milibris dump --hd -o ./out           # pages + PDF + per-article Markdown
+      milibris pdf                          # readable PDF, typeset from the text
+      milibris pdf --facsimile              # the page scans instead
+      milibris dump -o ./out                # pages + both PDFs + Markdown
       milibris search "melenchon" --json
     """
 
@@ -861,14 +1063,21 @@ def read(article_id: str, issue_ref: str, out: str, host: str, as_json: bool) ->
 @click.argument("issue", required=False)
 @click.option("-o", "--out", type=click.Path(), help="Output directory "
               "[default: ./dump/<title>/<date>].")
-@click.option("--hd", is_flag=True, help="Stitch the HD tilesets instead of the LD renders.")
+@click.option("--hd/--ld", default=True, show_default="--hd", help="Page renders: "
+              "HD stitches the tilesets (the liseuse maximum); LD is a quarter "
+              "of the pixels and is not readable in print.")
 @click.option("--page", "only_page", type=int, help="Dump a single page.")
-@click.option("--no-pdf", is_flag=True, help="Skip the assembled PDF.")
-@click.option("--no-articles", is_flag=True, help="Skip the per-article Markdown.")
+@click.option("--no-pdf", is_flag=True, help="Skip both PDFs.")
+@click.option("--no-articles", is_flag=True, help="Skip the per-article Markdown "
+              "(and, with it, the readable PDF).")
 @host_option
 def dump(issue: str, out: str, hd: bool, only_page: int, no_pdf: bool,
          no_articles: bool, host: str) -> None:
-    """Archive a whole issue: page JPEGs, a PDF, and per-article Markdown."""
+    """Archive a whole issue: page JPEGs, two PDFs, and per-article Markdown.
+
+    Writes both a facsimile PDF (the page scans, capped at the liseuse's own
+    resolution) and a readable PDF typeset from the article text.
+    """
     target = Kiosk(resolve_host(host)).resolve(issue)
     material, meta = target.material, target.metadata
     slug = slugify(meta.get("title", "issue"))
@@ -892,9 +1101,9 @@ def dump(issue: str, out: str, hd: bool, only_page: int, no_pdf: bool,
     if written and not no_pdf:
         logging.getLogger("pikepdf").setLevel(logging.WARNING)  # it greets on import
         import img2pdf
-        pdf = outdir / f"{slug}-{date}.pdf"
+        pdf = outdir / f"{slug}-{date}-facsimile.pdf"
         pdf.write_bytes(img2pdf.convert([str(p) for p in written]))
-        log.info("pdf → %s", pdf)
+        log.info("facsimile pdf → %s", pdf)
 
     if not no_articles:
         resources = outdir / "resources"
@@ -908,14 +1117,68 @@ def dump(issue: str, out: str, hd: bool, only_page: int, no_pdf: bool,
                 local.write_bytes(target.fetch(path, binary=True))
             return f"resources/{name}"
 
-        for row in target.toc():
+        rows = target.toc()
+        articles = {}
+        for row in rows:
             article = target.article(row["id"])
+            articles[row["id"]] = article
             name = (f"p{row['page']:03d}-{slugify(row['title'])}.md" if row["page"]
                     else f"{slugify(row['title'])}.md")
             (outdir / name).write_text(article_to_markdown(article, meta, localise))
             log.info("article → %s", outdir / name)
 
+        if not no_pdf:
+            readable = outdir / f"{slug}-{date}-texte.pdf"
+            html_to_pdf(issue_to_html(meta, rows, articles, target.asset_url), readable)
+            log.info("readable pdf → %s", readable)
+
     click.echo(str(outdir))
+
+
+@cli.command()
+@click.argument("issue", required=False)
+@click.option("-o", "--out", type=click.Path(), help="Output PDF path.")
+@click.option("--facsimile", is_flag=True, help="Assemble the page scans instead "
+              "of typesetting the text.")
+@click.option("--hd/--ld", default=True, show_default="--hd",
+              help="Facsimile only: which page renders to assemble.")
+@host_option
+def pdf(issue: str, out: str, facsimile: bool, hd: bool, host: str) -> None:
+    """Build a readable PDF of a whole issue, typeset from the article text.
+
+    The liseuse serves at most ~1400x2050 pixels per printed sheet, which on a
+    broadsheet is barely legible and never selectable. The default output is
+    therefore typeset from the article JSON — readable, searchable and small.
+    Pass --facsimile for the page scans at the liseuse's own resolution.
+    """
+    target = Kiosk(resolve_host(host)).resolve(issue)
+    meta = target.metadata
+    slug, date = slugify(meta.get("title", "issue")), meta.get("publication_date", target.mid)
+
+    if facsimile:
+        logging.getLogger("pikepdf").setLevel(logging.WARNING)  # it greets on import
+        import img2pdf
+
+        path = Path(out) if out else Path(f"{slug}-{date}-facsimile.pdf")
+        with tempfile.TemporaryDirectory() as td:
+            pages = []
+            for spec in target.material.get("pages", []):
+                page_path = Path(td) / f"page-{spec['number']:03d}.jpg"
+                page_path.write_bytes(target.page_image(spec, hd=hd))
+                pages.append(str(page_path))
+                log.info("page %s", spec["number"])
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(img2pdf.convert(pages))
+    else:
+        path = Path(out) if out else Path(f"{slug}-{date}-texte.pdf")
+        rows = target.toc()
+        articles = {}
+        for row in rows:
+            articles[row["id"]] = target.article(row["id"])
+            log.info("article %s", row["title"])
+        html_to_pdf(issue_to_html(meta, rows, articles, target.asset_url), path)
+
+    click.echo(str(path))
 
 
 @cli.command()

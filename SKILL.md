@@ -5,8 +5,9 @@ description:
   with the bundled `milibris` command — the platform behind the digital editions
   of many French newspapers and magazines (digital.<publisher>.fr and friends).
   Use to list a kiosk's titles and issues, print an issue's table of contents,
-  render one article as Markdown, archive a whole issue (page JPEGs + PDF +
-  per-article Markdown), or full-text search the archive. Authenticates by
+  render one article as Markdown, build a readable PDF of a whole issue, archive
+  an issue (page JPEGs + PDFs + per-article Markdown), or full-text search the
+  archive. Authenticates by
   reading the kiosk session out of the user's browser — no login to run. Every
   read supports --json."
 allowed-tools:
@@ -87,9 +88,13 @@ milibris toc n249-2026 --rubric dossier
 milibris read <article-id> --issue n249-2026 # one article as Markdown
 milibris read <article-id> -o out/a.md
 milibris read <article-id> --json            # the raw reader article JSON
-milibris dump                                # pages + PDF + per-article Markdown
-milibris dump n248-2026 --hd -o /tmp/out
+milibris pdf                                 # readable PDF, typeset from the text
+milibris pdf n249-2026 -o /tmp/issue.pdf
+milibris pdf --facsimile                     # the page scans instead
+milibris dump                                # pages + both PDFs + Markdown
+milibris dump n248-2026 -o /tmp/out
 milibris dump --page 5 --no-articles         # just one page
+milibris dump --ld                           # quarter-resolution pages
 milibris search "ukraine" --json
 milibris search "ukraine" --issue n250-2026 --page 1
 milibris material                            # the raw decrypted manifest (JSON)
@@ -99,18 +104,31 @@ milibris set-host digital.example.fr
 `dump` writes to `./dump/<title>/<date>/` unless `-o`:
 
 ```
-pages/page-NNN.jpg     LD renders, or HD tilesets stitched with --hd
-<title>-<date>.pdf     the pages assembled
-pNNN-<slug>.md         one Markdown file per article, YAML frontmatter included
-resources/<mid>.jpg    article images, saved so the files outlive the ticket
+pages/page-NNN.jpg              HD stitched page renders (--ld for the small ones)
+<title>-<date>-facsimile.pdf    the page renders assembled
+<title>-<date>-texte.pdf        readable PDF typeset from the article text
+pNNN-<slug>.md                  one Markdown file per article, frontmatter included
+resources/<mid>.jpg             article images, saved so the files outlive the ticket
 ```
 
-## LD vs HD
+## Resolution — read this before promising a readable scan
 
-Pages come in two renditions. LD is one JPEG per page (~700px wide) — fine for
-a thumbnail or a quick look. `--hd` stitches the tileset into the full-resolution
-page (text actually readable, several requests per page). Use LD by default;
-reach for `--hd` when the user wants print quality or wants to read the image.
+**The liseuse caps page rasters at roughly 1400×2050 pixels per printed sheet,
+and there is no higher-resolution source.** `hd` is the maximum the manifest
+exposes, the tiles measure exactly that, and the web kiosk has no PDF download.
+On a broadsheet — where one "page" is a whole printed sheet carrying two
+newspaper pages — that leaves body text around 11px tall: legible at 1:1 on
+screen, mushy once printed or zoomed, and never selectable.
+
+So:
+
+- **For reading or printing an issue, use `milibris pdf`** — it typesets the
+  article JSON into an A4 document that is sharp at any zoom, searchable, and
+  ~15× smaller. This is the right answer to "the PDF is not readable".
+- **`--facsimile` / `dump`'s facsimile PDF is for the layout**, not for reading:
+  the page as it was printed, at the only resolution available.
+- `--ld` exists for thumbnails and quick looks. It is a quarter of the pixels
+  and is *not* readable. It used to be the default; it no longer is.
 
 ## Output conventions
 
@@ -123,9 +141,14 @@ reach for `--hd` when the user wants print quality or wants to read the image.
 
 ## Common patterns for agents
 
-**Archive the current issue at full resolution:**
+**Give the user something they can actually read:**
 ```bash
-milibris dump --hd            # → ./dump/<title>/<date>/
+milibris pdf                  # → ./<title>-<date>-texte.pdf, typeset and searchable
+```
+
+**Archive the current issue completely:**
+```bash
+milibris dump                 # → ./dump/<title>/<date>/ (HD pages, both PDFs, Markdown)
 ```
 
 **Find an article in the archive, then read it:**
@@ -155,4 +178,6 @@ milibris issues -n 5 --json | jq -r '.[].slug' \
 - **Don't** cache a ticket: it expires in ~30 minutes. The CLI re-mints it on a
   401 and every command mints its own.
 - **Don't** parse the human output; use `--json`.
-- **Don't** use `--hd` by default — it is one request per tile per page.
+- **Don't** offer the facsimile when the user wants to *read* — hand them
+  `milibris pdf`. The scans cannot be made sharper; the text can.
+- **Don't** reach for `--ld` unless thumbnails are genuinely what is wanted.

@@ -23,8 +23,12 @@ A single [PEP 723](https://peps.python.org/pep-0723/) `uv` script — dependenci
 resolve on first run, nothing to install:
 
 ```bash
-ln -sfn "$PWD/bin/milibris" ~/.local/bin/milibris
+git clone https://github.com/ClementWalter/milibris-cli.git
+ln -sfn "$PWD/milibris-cli/bin/milibris" ~/.local/bin/milibris
 ```
+
+Requires [uv](https://docs.astral.sh/uv/) and macOS (the cookie decryption uses
+the system keychain).
 
 The symlink points at this checkout, so a `git pull` or an uncommitted edit
 takes effect immediately.
@@ -84,7 +88,7 @@ resources/<mid>.jpg    article images, saved so the files outlive the ticket
 
 ## As a library
 
-`franc-tireur-cli` imports this module for the liseuse half of its work:
+[franc-tireur-cli](https://github.com/ClementWalter/franc-tireur-cli) imports this module for the liseuse half of its work:
 
 ```python
 from milibris_cli import Kiosk

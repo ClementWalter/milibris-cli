@@ -1,5 +1,7 @@
 # milibris-cli
 
+**Visibility: public.**
+
 Read any **miLibris** digital kiosk (liseuse / e-paper reader) from the
 terminal, as the logged-in subscriber.
 
@@ -117,8 +119,7 @@ issue.page_image(issue.material["pages"][0], hd=True)
 ## Tests
 
 ```bash
-uv run --with pytest --with click --with curl_cffi --with beautifulsoup4 \
-  --with lxml --with markdownify --with pycryptodome -m pytest tests -q
+uv run --script tests/test_milibris.py
 ```
 
 55 tests over the pure layers — ref parsing, the manifest key derivation,

@@ -2,15 +2,18 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#     "click>=8.1",
-#     "curl_cffi>=0.7",
-#     "beautifulsoup4>=4.12",
-#     "lxml>=5.0",
-#     "markdownify>=0.13",
-#     "pycryptodome>=3.20",
-#     "Pillow>=10.0",
-#     "img2pdf>=0.5",
+#     "click==8.5.0",
+#     "curl_cffi==0.17.0",
+#     "beautifulsoup4==4.15.0",
+#     "lxml==6.1.3",
+#     "markdownify==1.2.3",
+#     "pycryptodome==4.2.0",
+#     "Pillow==13.0.0",
+#     "img2pdf==0.6.3",
 # ]
+#
+# [tool.uv]
+# exclude-newer = "2026-10-27T00:00:00Z"
 # ///
 """miLibris web-kiosk CLI — read any miLibris-powered digital kiosk from the shell.
 
@@ -929,27 +932,13 @@ host_option = click.option("--host", help="Kiosk host, e.g. digital.franc-tireur
 json_option = click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
 
 
-@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@click.group(context_settings={"help_option_names": ["-h", "--help"]}, epilog="\b\nExamples:\n  milibris kiosks\n  milibris issues -n 10\n  milibris toc n249-2026 --json\n  milibris read 00000000-0000-0000-0000-000000000000\n  milibris pdf\n  milibris search \"melenchon\" --json")
 @click.version_option("1.0.0", prog_name="milibris")
 def cli() -> None:
-    """Read any miLibris digital kiosk (liseuse) from the terminal.
-
-    \b
-    Examples:
-      milibris kiosks                       # kiosks you are logged into
-      milibris titles                       # catalogue of the default kiosk
-      milibris issues -n 10                 # recent issues, newest first
-      milibris toc                          # TOC of the latest issue
-      milibris toc n249-2026 --json         # TOC of one issue, as JSON
-      milibris read <article-id>            # one article as Markdown
-      milibris pdf                          # readable PDF, typeset from the text
-      milibris pdf --facsimile              # the page scans instead
-      milibris dump -o ./out                # pages + both PDFs + Markdown
-      milibris search "melenchon" --json
-    """
+    """Read any miLibris digital kiosk (liseuse) from the terminal."""
 
 
-@cli.command()
+@cli.command(epilog="\b\nExamples:\n  milibris kiosks\n  milibris kiosks --json")
 @json_option
 def kiosks(as_json: bool) -> None:
     """List the miLibris kiosks your local browsers hold a session for."""
@@ -964,7 +953,7 @@ def kiosks(as_json: bool) -> None:
                        for r in data])
 
 
-@cli.command()
+@cli.command(epilog="\b\nExamples:\n  milibris whoami\n  milibris whoami --host digital.franc-tireur.fr --json")
 @host_option
 @json_option
 def whoami(host: str, as_json: bool) -> None:
@@ -978,7 +967,7 @@ def whoami(host: str, as_json: bool) -> None:
         raise SystemExit(1)
 
 
-@cli.command()
+@cli.command(epilog="\b\nExamples:\n  milibris titles\n  milibris titles --json")
 @host_option
 @json_option
 def titles(host: str, as_json: bool) -> None:
@@ -989,7 +978,7 @@ def titles(host: str, as_json: bool) -> None:
         for r in data])
 
 
-@cli.command()
+@cli.command(epilog="\b\nExamples:\n  milibris issues -n 20\n  milibris issues franc-tireur --json")
 @click.argument("title", required=False)
 @click.option("-n", "--limit", default=30, show_default=True, help="How many issues.")
 @host_option
@@ -1003,7 +992,7 @@ def issues(title: str, limit: int, host: str, as_json: bool) -> None:
         for r in data])
 
 
-@cli.command()
+@cli.command(epilog="\b\nExamples:\n  milibris issue\n  milibris issue n249-2026 --json")
 @click.argument("issue", required=False)
 @host_option
 @json_option
@@ -1020,7 +1009,7 @@ def issue(issue: str, host: str, as_json: bool) -> None:
         click.echo(f"{d['pages']} pages, {d['articles']} articles — mid {d['mid']}")])
 
 
-@cli.command()
+@cli.command(epilog="\b\nExamples:\n  milibris toc --json\n  milibris toc n249-2026 --rubric dossier")
 @click.argument("issue", required=False)
 @click.option("--rubric", help="Keep only articles in this rubric (case-insensitive).")
 @host_option
@@ -1036,7 +1025,7 @@ def toc(issue: str, rubric: str, host: str, as_json: bool) -> None:
         for r in data])
 
 
-@cli.command()
+@cli.command(epilog="\b\nExamples:\n  milibris read 00000000-0000-0000-0000-000000000000 --issue n249-2026\n  milibris read 00000000-0000-0000-0000-000000000000 -o out/a.md\n  milibris read 00000000-0000-0000-0000-000000000000 --json")
 @click.argument("article_id")
 @click.option("--issue", "issue_ref", help="Issue the article belongs to (default: latest).")
 @click.option("-o", "--out", type=click.Path(), help="Write to this file instead of stdout.")
@@ -1059,7 +1048,7 @@ def read(article_id: str, issue_ref: str, out: str, host: str, as_json: bool) ->
         click.echo(text)
 
 
-@cli.command()
+@cli.command(epilog="\b\nExamples:\n  milibris dump\n  milibris dump n248-2026 -o /tmp/out\n  milibris dump --page 5 --no-articles\n  milibris dump --ld")
 @click.argument("issue", required=False)
 @click.option("-o", "--out", type=click.Path(), help="Output directory "
               "[default: ./dump/<title>/<date>].")
@@ -1135,7 +1124,7 @@ def dump(issue: str, out: str, hd: bool, only_page: int, no_pdf: bool,
     click.echo(str(outdir))
 
 
-@cli.command()
+@cli.command(epilog="\b\nExamples:\n  milibris pdf\n  milibris pdf n249-2026 -o /tmp/issue.pdf\n  milibris pdf --facsimile")
 @click.argument("issue", required=False)
 @click.option("-o", "--out", type=click.Path(), help="Output PDF path.")
 @click.option("--facsimile", is_flag=True, help="Assemble the page scans instead "
@@ -1181,7 +1170,7 @@ def pdf(issue: str, out: str, facsimile: bool, hd: bool, host: str) -> None:
     click.echo(str(path))
 
 
-@cli.command()
+@cli.command(epilog="\b\nExamples:\n  milibris search \"ukraine\" --json\n  milibris search \"ukraine\" --issue n250-2026 --page 1")
 @click.argument("query")
 @click.option("--issue", "issue_ref", help="Restrict to one issue.")
 @click.option("--page", default=0, show_default=True, help="Result page (0-based).")
@@ -1204,7 +1193,7 @@ def search(query: str, issue_ref: str, page: int, host: str, as_json: bool) -> N
     emit(data, as_json, show)
 
 
-@cli.command()
+@cli.command(epilog="\b\nExamples:\n  milibris material\n  milibris material n249-2026 > material.json")
 @click.argument("issue", required=False)
 @host_option
 def material(issue: str, host: str) -> None:
@@ -1213,7 +1202,7 @@ def material(issue: str, host: str) -> None:
     click.echo(jsonlib.dumps(target.material, ensure_ascii=False, indent=2))
 
 
-@cli.command("set-host")
+@cli.command("set-host", epilog="\b\nExamples:\n  milibris set-host digital.franc-tireur.fr")
 @click.argument("host")
 def set_host(host: str) -> None:
     """Remember a default kiosk host in ~/.config/milibris-cli/config.json."""
@@ -1222,13 +1211,6 @@ def set_host(host: str) -> None:
     save_config(cfg)
     click.echo(cfg["host"])
 
-
-# Provider commands share the app and MCP execution policy.
-from pathlib import Path as _PolicyPath
-import sys as _policy_sys
-_policy_sys.path.insert(0, str(_PolicyPath(__file__).resolve().parent))
-from onebrain_policy import install as _install_onebrain_policy
-_install_onebrain_policy(cli, 'milibris')
 
 if __name__ == "__main__":
     cli()

@@ -19,32 +19,13 @@ allowed-tools:
 
 Terminal access to any miLibris-powered liseuse, as the logged-in subscriber.
 
-## What miLibris is
-
-miLibris hosts the digital edition ("liseuse") of many titles. Each publisher
-gets its own host, but they all run the same two pieces:
-
-1. a server-rendered **kiosk** (catalogue, issue pages, `/library`, search)
-   whose only credential is an Express session cookie named
-   `<name>WebKioskSessionKey`;
-2. the shared **HTML5 reader**, which pulls a `material.json` manifest, page
-   images and per-article JSON from `content.milibris.com` under a ~30-minute
-   ticket JWT minted by the kiosk.
-
-So this CLI is host-agnostic: it discovers kiosks by scanning the browser's
-cookie stores, then speaks both protocols. It is also importable as a Python
-module (`Kiosk`, `Issue`), which is how `franc-tireur-cli` reuses it.
-
 ## How to invoke
 
-Invoke it as **`milibris`** — on `$PATH` via a symlink in `~/.local/bin` onto
-this repo's `bin/milibris`, so a `git pull` or an uncommitted edit takes effect
-immediately with nothing to reinstall. It is a PEP 723 `uv` script; deps resolve
-on first run.
-
-```bash
-ln -sfn <skill-dir>/bin/milibris ~/.local/bin/milibris
-```
+Invoke it as **`milibris`**, on `$PATH` via `uv run claudine/scripts/link_clis.py`
+(it links this repo's `bin/milibris` into `~/.local/bin`, so a `git pull` or an
+uncommitted edit takes effect at once). If `milibris` is missing from `$PATH`,
+run `<skill-dir>/bin/milibris` directly. It is a PEP 723 `uv` script; deps
+resolve on first run.
 
 ## Authentication
 
@@ -54,25 +35,14 @@ session cookie. **Start with `milibris kiosks`** — it lists exactly which host
 the user is logged into. If it comes back empty, tell them to open the kiosk in
 their browser and sign in; there is no login flow to automate here.
 
-## Picking the kiosk
+## Output conventions
 
-Every command resolves the host in this order: `--host`, `$MILIBRIS_HOST`,
-`~/.config/milibris-cli/config.json`, then the only kiosk found in the browser.
-With several kiosks logged in, an unqualified command errors rather than
-guessing — pass `--host` or run `milibris set-host <host>` once.
-
-## Identifying an issue
-
-Every issue-taking command accepts, in any of these forms (default: the latest
-issue):
-
-- `latest` or nothing
-- an issue slug — `n250-2026`
-- a `title/version/slug` path — `franc-tireur/franc-tireur/n250-2026`
-- an issue mid (UUID) — from `issues --json` or `search --json`
-- a full kiosk or `/reader/<mid>` URL
-
-An unknown slug is an **error**, never a silent fallback to the latest issue.
+- **`--json` on every read.** Human output is plain aligned text with no ANSI,
+  so it pipes; never parse it — use `--json` for chaining.
+- **Markdown** carries YAML frontmatter (title, publication, issue, date, page,
+  rubrics, authors, words, reading time).
+- **No silent fallbacks.** Failures exit non-zero with a one-line reason;
+  surface it to the user.
 
 ## Commands
 
@@ -111,35 +81,7 @@ pNNN-<slug>.md                  one Markdown file per article, frontmatter inclu
 resources/<mid>.jpg             article images, saved so the files outlive the ticket
 ```
 
-## Resolution — read this before promising a readable scan
-
-**The liseuse caps page rasters at roughly 1400×2050 pixels per printed sheet,
-and there is no higher-resolution source.** `hd` is the maximum the manifest
-exposes, the tiles measure exactly that, and the web kiosk has no PDF download.
-On a broadsheet — where one "page" is a whole printed sheet carrying two
-newspaper pages — that leaves body text around 11px tall: legible at 1:1 on
-screen, mushy once printed or zoomed, and never selectable.
-
-So:
-
-- **For reading or printing an issue, use `milibris pdf`** — it typesets the
-  article JSON into an A4 document that is sharp at any zoom, searchable, and
-  ~15× smaller. This is the right answer to "the PDF is not readable".
-- **`--facsimile` / `dump`'s facsimile PDF is for the layout**, not for reading:
-  the page as it was printed, at the only resolution available.
-- `--ld` exists for thumbnails and quick looks. It is a quarter of the pixels
-  and is *not* readable. It used to be the default; it no longer is.
-
-## Output conventions
-
-- **`--json` on every read.** Human output is plain aligned text with no ANSI,
-  so it pipes; never parse it — use `--json` for chaining.
-- **Markdown** carries YAML frontmatter (title, publication, issue, date, page,
-  rubrics, authors, words, reading time).
-- **No silent fallbacks.** Failures exit non-zero with a one-line reason;
-  surface it to the user.
-
-## Common patterns for agents
+## Recipes
 
 **Give the user something they can actually read:**
 ```bash
@@ -169,7 +111,7 @@ milibris issues -n 5 --json | jq -r '.[].slug' \
   | xargs -I{} milibris issue {} --json | jq -c '{issue_number, pages, articles}'
 ```
 
-## Don'ts
+## Gotchas
 
 - **Don't** invent slugs — run `milibris issues` first.
 - **Don't** hit the kiosk or `content.milibris.com` with plain `curl`: the
@@ -181,3 +123,58 @@ milibris issues -n 5 --json | jq -r '.[].slug' \
 - **Don't** offer the facsimile when the user wants to *read* — hand them
   `milibris pdf`. The scans cannot be made sharper; the text can.
 - **Don't** reach for `--ld` unless thumbnails are genuinely what is wanted.
+
+## What miLibris is
+
+miLibris hosts the digital edition ("liseuse") of many titles. Each publisher
+gets its own host, but they all run the same two pieces:
+
+1. a server-rendered **kiosk** (catalogue, issue pages, `/library`, search)
+   whose only credential is an Express session cookie named
+   `<name>WebKioskSessionKey`;
+2. the shared **HTML5 reader**, which pulls a `material.json` manifest, page
+   images and per-article JSON from `content.milibris.com` under a ~30-minute
+   ticket JWT minted by the kiosk.
+
+So this CLI is host-agnostic: it discovers kiosks by scanning the browser's
+cookie stores, then speaks both protocols. It is also importable as a Python
+module (`Kiosk`, `Issue`), which is how `franc-tireur-cli` reuses it.
+
+## Picking the kiosk
+
+Every command resolves the host in this order: `--host`, `$MILIBRIS_HOST`,
+`~/.config/milibris-cli/config.json`, then the only kiosk found in the browser.
+With several kiosks logged in, an unqualified command errors rather than
+guessing — pass `--host` or run `milibris set-host <host>` once.
+
+## Identifying an issue
+
+Every issue-taking command accepts, in any of these forms (default: the latest
+issue):
+
+- `latest` or nothing
+- an issue slug — `n250-2026`
+- a `title/version/slug` path — `franc-tireur/franc-tireur/n250-2026`
+- an issue mid (UUID) — from `issues --json` or `search --json`
+- a full kiosk or `/reader/<mid>` URL
+
+An unknown slug is an **error**, never a silent fallback to the latest issue.
+
+## Resolution — read this before promising a readable scan
+
+**The liseuse caps page rasters at roughly 1400×2050 pixels per printed sheet,
+and there is no higher-resolution source.** `hd` is the maximum the manifest
+exposes, the tiles measure exactly that, and the web kiosk has no PDF download.
+On a broadsheet — where one "page" is a whole printed sheet carrying two
+newspaper pages — that leaves body text around 11px tall: legible at 1:1 on
+screen, mushy once printed or zoomed, and never selectable.
+
+So:
+
+- **For reading or printing an issue, use `milibris pdf`** — it typesets the
+  article JSON into an A4 document that is sharp at any zoom, searchable, and
+  ~15× smaller. This is the right answer to "the PDF is not readable".
+- **`--facsimile` / `dump`'s facsimile PDF is for the layout**, not for reading:
+  the page as it was printed, at the only resolution available.
+- `--ld` exists for thumbnails and quick looks. It is a quarter of the pixels
+  and is *not* readable. It used to be the default; it no longer is.

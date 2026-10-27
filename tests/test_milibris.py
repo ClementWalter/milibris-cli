@@ -1,8 +1,18 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["pytest>=8.0", "click>=8.1", "curl_cffi>=0.7", "beautifulsoup4>=4.12",
-#                 "lxml>=5.0", "markdownify>=0.13", "pycryptodome>=3.20"]
+# dependencies = [
+#     "pytest==9.1.1",
+#     "click==8.5.0",
+#     "curl_cffi==0.17.0",
+#     "beautifulsoup4==4.15.0",
+#     "lxml==6.1.3",
+#     "markdownify==1.2.3",
+#     "pycryptodome==4.2.0",
+# ]
+#
+# [tool.uv]
+# exclude-newer = "2026-10-27T00:00:00Z"
 # ///
 """Unit tests for milibris_cli's pure layers: ref parsing, the manifest key
 derivation, catalogue scraping, and article→Markdown rendering. No network."""
@@ -361,3 +371,7 @@ def test_article_html_keeps_a_real_picture_credit():
 def test_article_html_routes_images_through_the_resolver():
     out = article_to_html(ARTICLE, None, lambda p: f"local/{p.rsplit('/', 1)[-1]}")
     assert 'src="local/abc.jpg"' in out
+
+
+if __name__ == "__main__":
+    sys.exit(pytest.main([__file__, "-q"]))

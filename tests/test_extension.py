@@ -17,6 +17,7 @@
 """Tests for the terminal-free path: missing-session errors, the Downloads
 default for files, and the headless-Chrome PDF engine. No network."""
 
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -175,6 +176,26 @@ def test_browser_cookies_decrypts_a_kiosk_session(cookie_store):
 def test_browser_cookies_skips_the_keychain_without_a_match(cookie_store):
     milibris_cli.browser_cookies("%WebKioskSessionKey", "%other.fr")
     assert cookie_store == []
+
+
+class StubArticleIssue(StubIssue):
+    asset_url = staticmethod(lambda path: path)
+
+    def article(self, article_id):
+        return {"title": "Titre", "content": {"sections": []}}
+
+
+class StubArticleKiosk(StubKiosk):
+    def resolve(self, ref):
+        return StubArticleIssue()
+
+
+def test_read_to_a_file_with_json_reports_the_path(monkeypatch, tmp_path):
+    monkeypatch.setattr(milibris_cli, "Kiosk", StubArticleKiosk)
+    out = tmp_path / "a.md"
+    result = CliRunner().invoke(milibris_cli.cli, ["read", "a1", "-o", str(out), "--json",
+                                                   "--host", "digital.example.fr"])
+    assert json.loads(result.output)["path"] == str(out)
 
 
 if __name__ == "__main__":

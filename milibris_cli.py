@@ -1076,7 +1076,9 @@ def read(article_id: str, issue_ref: str, out: str, host: str, as_json: bool) ->
     """Render one article as Markdown (article ids come from `toc`)."""
     target = Kiosk(resolve_host(host)).resolve(issue_ref)
     article = target.article(article_id)
-    if as_json:
+    # A file request wins over --json, which then reports the file: MCP
+    # clients pass --json on every call.
+    if as_json and not out:
         click.echo(jsonlib.dumps(article, ensure_ascii=False, indent=2))
         return
     text = article_to_markdown(article, target.metadata, target.asset_url)
@@ -1084,7 +1086,8 @@ def read(article_id: str, issue_ref: str, out: str, host: str, as_json: bool) ->
         path = Path(out)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
-        log.info("wrote %s", path)
+        resolved = str(path.resolve())
+        click.echo(jsonlib.dumps({"path": resolved}) if as_json else resolved)
     else:
         click.echo(text)
 

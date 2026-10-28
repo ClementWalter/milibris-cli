@@ -133,3 +133,9 @@ uv run --script tests/test_milibris.py
 
 55 tests over the pure layers — ref parsing, the manifest key derivation,
 catalogue scraping and Markdown rendering. No network.
+
+## Privacy Policy
+
+The Claude Desktop extension built from this repository keeps your data on your
+Mac and talks only to the service it connects to. Full policy:
+<https://clementwalter.github.io/claude-extensions/privacy/>

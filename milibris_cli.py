@@ -78,6 +78,24 @@ UA = (
 )
 
 CONFIG_PATH = Path.home() / ".config" / "milibris-cli" / "config.json"
+# Where files land without -o: a folder a Finder user finds, whatever the cwd.
+DOWNLOADS = Path.home() / "Downloads" / "milibris"
+
+# Chromium-family apps that can print HTML to PDF headless, in preference order.
+CHROME_BINARIES = (
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+)
+
+# Appended to every "no session" error: the cookie read goes through the
+# keychain, and a denied prompt looks exactly like being logged out.
+LOGIN_HINT = (
+    "Sign in there in Chrome (or Arc/Brave/Edge), then try again. If macOS asks "
+    "to let `security` use the \"Chrome Safe Storage\" keychain item, click "
+    "Always Allow."
+)
 
 # Chromium cookie stores this CLI knows how to open, in preference order:
 # (label, cookie sqlite path, keychain service holding the AES key)
@@ -144,9 +162,6 @@ def browser_cookies(name_like: str, host_like: str = "%") -> list[dict]:
         store = Path(path).expanduser()
         if not store.exists():
             continue
-        key = _keychain_key(service)
-        if not key:
-            continue
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td) / "Cookies"
             try:
@@ -160,6 +175,13 @@ def browser_cookies(name_like: str, host_like: str = "%") -> list[dict]:
                 con.close()
             except (OSError, sqlite3.Error):
                 continue
+        # Only ask the keychain for a store that holds a matching cookie, so a
+        # signed-out browser never shows a keychain prompt for nothing.
+        if not rows:
+            continue
+        key = _keychain_key(service)
+        if not key:
+            continue
         for host, cname, enc in rows:
             value = _decrypt_cookie(bytes(enc), key)
             if value:
@@ -213,12 +235,12 @@ def resolve_host(host: str | None) -> str:
         return kiosks[0]["host"]
     if not kiosks:
         raise click.ClickException(
-            "No miLibris kiosk session found in Chrome/Arc/Brave/Edge. Log into "
-            "your kiosk (e.g. https://digital.franc-tireur.fr) in the browser, "
-            "then re-run. Pass --host to name it explicitly."
+            "No miLibris kiosk session found in Chrome/Arc/Brave/Edge. Open your "
+            "kiosk (e.g. https://digital.franc-tireur.fr). " + LOGIN_HINT
         )
     names = ", ".join(k["host"] for k in kiosks)
-    raise click.ClickException(f"Several kiosks available ({names}) — pass --host.")
+    raise click.ClickException(f"Several kiosks available ({names}) — pass --host, "
+                               "or set the kiosk address in the extension settings.")
 
 
 # --------------------------------------------------------------------------- #
@@ -495,9 +517,10 @@ def html_to_pdf(document: str, out: Path, base_url: str | None = None) -> None:
     """Write a PDF with the first working engine.
 
     WeasyPrint's Python lib is preferred — it is the only path that fetches the
-    ticketed images. It needs native libs (`brew install pango` on macOS);
-    failing that, any `wkhtmltopdf` or `weasyprint` binary on PATH renders the
-    same document, minus the remote images.
+    ticketed images through the Chrome fingerprint. It needs native libs
+    (`brew install pango` on macOS); failing that, any `wkhtmltopdf` or
+    `weasyprint` binary on PATH, then an installed Chrome (or Chromium/Brave/
+    Edge) printing headless, which every Mac with a browser session has.
     """
     out.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -521,20 +544,39 @@ def html_to_pdf(document: str, out: Path, base_url: str | None = None) -> None:
                                      encoding="utf-8") as fh:
         fh.write(document)
         tmp = fh.name
+    profile = tempfile.mkdtemp(prefix="milibris-chrome-")
     try:
-        for argv in (["wkhtmltopdf", "--quiet", "--encoding", "utf-8", tmp, str(out)],
-                     ["weasyprint", tmp, str(out)]):
-            if shutil.which(argv[0]) is None:
+        for argv in pdf_engines(tmp, out, profile):
+            try:
+                run = subprocess.run(argv, capture_output=True, text=True,
+                                     check=False, timeout=300)
+            except (OSError, subprocess.TimeoutExpired):
                 continue
-            run = subprocess.run(argv, capture_output=True, text=True, check=False)
             if run.returncode == 0 and out.exists():
                 return
         raise click.ClickException(
-            "No working HTML→PDF engine. Install WeasyPrint's native libs "
+            "No working HTML→PDF engine. Install Google Chrome "
+            "(https://www.google.com/chrome/), or WeasyPrint's native libs "
             "(`brew install pango`), wkhtmltopdf, or the weasyprint CLI."
         )
     finally:
         Path(tmp).unlink(missing_ok=True)
+        shutil.rmtree(profile, ignore_errors=True)
+
+
+def pdf_engines(html_path: str, out: Path, profile: str) -> list[list[str]]:
+    """Command lines that turn html_path into out, for the engines installed here."""
+    engines = [argv for argv in (["wkhtmltopdf", "--quiet", "--encoding", "utf-8", html_path, str(out)],
+                                 ["weasyprint", html_path, str(out)]) if shutil.which(argv[0])]
+    chrome = next((b for b in CHROME_BINARIES if Path(b).is_file()), None)
+    if chrome:
+        # A throwaway profile keeps it off the user's running Chrome, and the
+        # mock keychain keeps a fresh profile from raising a keychain prompt.
+        engines.append([chrome, "--headless=new", "--disable-gpu", "--no-first-run",
+                        "--use-mock-keychain", "--no-pdf-header-footer",
+                        f"--user-data-dir={profile}", f"--print-to-pdf={out.resolve()}",
+                        Path(html_path).resolve().as_uri()])
+    return engines
 
 
 def article_to_html(article: dict, rubric: str | None, asset_url=None) -> str:
@@ -643,8 +685,7 @@ class Kiosk:
         rows = browser_cookies(f"%{KIOSK_COOKIE_SUFFIX}", f"%{host}")
         if not rows:
             raise click.ClickException(
-                f"No kiosk session cookie for {host}. Open https://{host} in "
-                "Chrome/Arc/Brave/Edge, log in, then re-run."
+                f"No kiosk session cookie for {host}. Open https://{host}. " + LOGIN_HINT
             )
         return rows[0]["name"], unquote(rows[0]["value"])
 
@@ -945,8 +986,8 @@ def kiosks(as_json: bool) -> None:
     rows = discover_kiosks()
     if not rows:
         raise click.ClickException(
-            "No kiosk session found. Log into a miLibris kiosk in Chrome/Arc/"
-            "Brave/Edge (e.g. https://digital.franc-tireur.fr) and re-run."
+            "No kiosk session found. Open your miLibris kiosk (e.g. "
+            "https://digital.franc-tireur.fr). " + LOGIN_HINT
         )
     emit([{k: v for k, v in r.items() if k != "value"} for r in rows], as_json,
          lambda data: [click.echo(f"{r['host']}\t{r['browser']}\t{r['name']}")
@@ -1051,7 +1092,7 @@ def read(article_id: str, issue_ref: str, out: str, host: str, as_json: bool) ->
 @cli.command(epilog="\b\nExamples:\n  milibris dump\n  milibris dump n248-2026 -o /tmp/out\n  milibris dump --page 5 --no-articles\n  milibris dump --ld")
 @click.argument("issue", required=False)
 @click.option("-o", "--out", type=click.Path(), help="Output directory "
-              "[default: ./dump/<title>/<date>].")
+              "[default: ~/Downloads/milibris/<title>/<date>].")
 @click.option("--hd/--ld", default=True, show_default="--hd", help="Page renders: "
               "HD stitches the tilesets (the liseuse maximum); LD is a quarter "
               "of the pixels and is not readable in print.")
@@ -1071,7 +1112,7 @@ def dump(issue: str, out: str, hd: bool, only_page: int, no_pdf: bool,
     material, meta = target.material, target.metadata
     slug = slugify(meta.get("title", "issue"))
     date = meta.get("publication_date", target.mid)
-    outdir = Path(out) if out else Path("dump") / slug / date
+    outdir = Path(out) if out else DOWNLOADS / slug / date
     (outdir / "pages").mkdir(parents=True, exist_ok=True)
 
     pages = material.get("pages", [])
@@ -1121,12 +1162,13 @@ def dump(issue: str, out: str, hd: bool, only_page: int, no_pdf: bool,
             html_to_pdf(issue_to_html(meta, rows, articles, target.asset_url), readable)
             log.info("readable pdf → %s", readable)
 
-    click.echo(str(outdir))
+    click.echo(str(outdir.resolve()))
 
 
 @cli.command(epilog="\b\nExamples:\n  milibris pdf\n  milibris pdf n249-2026 -o /tmp/issue.pdf\n  milibris pdf --facsimile")
 @click.argument("issue", required=False)
-@click.option("-o", "--out", type=click.Path(), help="Output PDF path.")
+@click.option("-o", "--out", type=click.Path(), help="Output PDF path "
+              "[default: ~/Downloads/milibris/<title>/<title>-<date>-texte.pdf].")
 @click.option("--facsimile", is_flag=True, help="Assemble the page scans instead "
               "of typesetting the text.")
 @click.option("--hd/--ld", default=True, show_default="--hd",
@@ -1148,7 +1190,7 @@ def pdf(issue: str, out: str, facsimile: bool, hd: bool, host: str) -> None:
         logging.getLogger("pikepdf").setLevel(logging.WARNING)  # it greets on import
         import img2pdf
 
-        path = Path(out) if out else Path(f"{slug}-{date}-facsimile.pdf")
+        path = Path(out) if out else DOWNLOADS / slug / f"{slug}-{date}-facsimile.pdf"
         with tempfile.TemporaryDirectory() as td:
             pages = []
             for spec in target.material.get("pages", []):
@@ -1159,7 +1201,7 @@ def pdf(issue: str, out: str, facsimile: bool, hd: bool, host: str) -> None:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(img2pdf.convert(pages))
     else:
-        path = Path(out) if out else Path(f"{slug}-{date}-texte.pdf")
+        path = Path(out) if out else DOWNLOADS / slug / f"{slug}-{date}-texte.pdf"
         rows = target.toc()
         articles = {}
         for row in rows:
@@ -1167,7 +1209,7 @@ def pdf(issue: str, out: str, facsimile: bool, hd: bool, host: str) -> None:
             log.info("article %s", row["title"])
         html_to_pdf(issue_to_html(meta, rows, articles, target.asset_url), path)
 
-    click.echo(str(path))
+    click.echo(str(path.resolve()))
 
 
 @cli.command(epilog="\b\nExamples:\n  milibris search \"ukraine\" --json\n  milibris search \"ukraine\" --issue n250-2026 --page 1")

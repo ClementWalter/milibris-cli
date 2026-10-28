@@ -1,0 +1,18 @@
+{
+  "display_name": "miLibris kiosks",
+  "description": "Read the digital editions of your miLibris newspaper and magazine subscriptions from Claude.",
+  "long_description": "miLibris runs the digital kiosk (liseuse) of many French titles, on addresses like digital.franc-tireur.fr. This extension reads the issues you subscribe to: tables of contents, articles as text, full-text search, and readable PDFs of whole issues.\n\nSetup:\n1. In Google Chrome (or Arc, Brave, Edge), open your title's digital kiosk and sign in with your subscriber account.\n2. In Claude, ask: \"list my miLibris kiosks\". The first time, macOS asks whether `security` may use the \"Chrome Safe Storage\" keychain item: type your Mac password and click Always Allow. This is how the extension reuses your browser session; nothing is sent anywhere else.\n3. If you subscribe to several kiosks, put the one you read most in this extension's settings (Kiosk address), or name it when you ask.\n\nPDFs and issue archives are saved in Downloads/milibris. If a request says the session is missing, sign in to the kiosk in Chrome again and ask once more.",
+  "platforms": ["darwin"],
+  "env": {
+    "MILIBRIS_HOST": "${user_config.kiosk_host}"
+  },
+  "user_config": {
+    "kiosk_host": {
+      "type": "string",
+      "title": "Kiosk address (optional)",
+      "description": "The kiosk to read by default, e.g. digital.franc-tireur.fr. Leave empty when you use a single kiosk.",
+      "default": "",
+      "required": false
+    }
+  }
+}

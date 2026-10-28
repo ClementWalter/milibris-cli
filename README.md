@@ -70,7 +70,7 @@ An issue is named by `latest` (the default), a slug (`n250-2026`), a
 `title/version/slug` path, a mid UUID, or a full kiosk/reader URL. An unknown
 slug is an error, never a silent fallback to the latest issue.
 
-`dump` writes to `./dump/<title>/<date>/`:
+`dump` writes to `~/Downloads/milibris/<title>/<date>/`:
 
 ```
 pages/page-NNN.jpg              HD stitched page renders (--ld for the small ones)
@@ -79,6 +79,15 @@ pages/page-NNN.jpg              HD stitched page renders (--ld for the small one
 pNNN-<slug>.md                  one Markdown file per article, frontmatter included
 resources/<mid>.jpg             article images, saved so the files outlive the ticket
 ```
+
+## Claude Desktop extension
+
+`mcpb.json` customizes the extension `mcp-bridge pack milibris-cli` builds, so
+someone without a terminal can install it by double-click. Its setup steps:
+sign in to the kiosk in Chrome, then ask Claude to list the kiosks and click
+Always Allow on the keychain prompt. Files land in `~/Downloads/milibris/`.
+Without WeasyPrint's native libs or a PDF binary on PATH, the readable PDF is
+printed by the installed Chrome running headless.
 
 ## Resolution
 

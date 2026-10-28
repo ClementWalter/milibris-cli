@@ -71,7 +71,7 @@ milibris material                            # the raw decrypted manifest (JSON)
 milibris set-host digital.example.fr
 ```
 
-`dump` writes to `./dump/<title>/<date>/` unless `-o`:
+`dump` writes to `~/Downloads/milibris/<title>/<date>/` unless `-o`:
 
 ```
 pages/page-NNN.jpg              HD stitched page renders (--ld for the small ones)
@@ -85,12 +85,12 @@ resources/<mid>.jpg             article images, saved so the files outlive the t
 
 **Give the user something they can actually read:**
 ```bash
-milibris pdf                  # → ./<title>-<date>-texte.pdf, typeset and searchable
+milibris pdf                  # → ~/Downloads/milibris/<title>/<title>-<date>-texte.pdf, typeset and searchable
 ```
 
 **Archive the current issue completely:**
 ```bash
-milibris dump                 # → ./dump/<title>/<date>/ (HD pages, both PDFs, Markdown)
+milibris dump                 # → ~/Downloads/milibris/<title>/<date>/ (HD pages, both PDFs, Markdown)
 ```
 
 **Find an article in the archive, then read it:**
